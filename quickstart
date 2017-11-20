@@ -1,0 +1,228 @@
+Airflow is a platform to programmatically author, schedule and monitor workflows.
+
+Use airflow to author workflows as directed acyclic graphs (DAGs) of tasks.
+The airflow scheduler executes your tasks on an array of workers while following the specified dependencies.
+Rich command line utilities make performing complex surgeries on DAGs a snap. The rich user interface makes it easy to visualize pipelines
+running in production, monitor progress, and troubleshoot issues when needed.
+
+When workflows are defined as code, they become more maintainable, versionable, testable, and collaborative.
+
+Principles:
+------------
+Dynamic:
+Airflow pipelines are configuration as code (Python), allowing for dynamic pipeline generation.
+This allows for writing code that instantiates pipelines dynamically.
+Extensible:
+Easily define your own operators, executors and extend the library so that it fits the level of abstraction that suits your environment.
+Elegant:
+Airflow pipelines are lean and explicit. Parameterizing your scripts is built into the core of Airflow using the powerful Jinja templating engine.
+Scalable:
+Airflow has a modular architecture and uses a message queue to orchestrate an arbitrary number of workers. Airflow is ready to scale to infinity.
+
+Installation:
+==============
+
+The installation is quick and straightforward.
+
+# airflow needs a home, ~/airflow is the default,
+# but you can lay foundation somewhere else if you prefer
+# (optional)
+export AIRFLOW_HOME=/Users/nwe.nganesan/Desktop/install_softwared/airflow
+
+# install from pypi using pip
+pip install airflow --ignore-installed six
+
+# initialize the database
+airflow initdb
+
+# start the web server, default port is 8080
+airflow webserver -p 8080
+
+#open the UI in browser
+http://localhost:8080/admin/
+
+
+Airflow uses a sqlite database, which you should outgrow fairly quickly since no parallelization is possible using this database backend.
+It works in conjunction with the SequentialExecutor which will only run task instances sequentially.
+While this is very limiting, it allows you to get up and running quickly and take a tour of the UI and the command line utilities.
+
+Different tasks run on different workers at different points in time, which means that this script cannot be used to cross communicate between tasks.
+Note that for this purpose we have a more advanced feature called XCom.
+
+
+Quickstart:
+-----------------
+
+Here are a few commands that will trigger a few task instances.
+You should be able to see the status of the jobs change in the example1 DAG as you run the commands below.
+
+# run your first task instance
+airflow run example_bash_operator runme_0 2015-01-01
+
+# run a backfill over 2 days
+airflow backfill example_bash_operator -s 2015-01-01 -e 2015-01-02
+
+
+
+Python Script:
+=================
+
+# The DAG object; we'll need this to instantiate a DAG
+from airflow import DAG
+
+# Operators; we need this to operate!
+from airflow.operators.bash_operator import BashOperator
+
+#default arguments
+from datetime import datetime, timedelta
+
+default_args = {
+    'owner': 'airflow',
+    'depends_on_past': False,
+    'start_date': datetime(2015, 6, 1),
+    'email': ['airflow@airflow.com'],
+    'email_on_failure': False,
+    'email_on_retry': False,
+    'retries': 1,
+    'retry_delay': timedelta(minutes=5),
+    # 'queue': 'bash_queue',
+    # 'pool': 'backfill',
+    # 'priority_weight': 10,
+    # 'end_date': datetime(2016, 1, 1),
+}
+
+
+#Dag name has to be unique across dag's
+dag = DAG('tutorial', default_args=default_args, schedule_interval=timedelta(1))
+
+#Tasks
+t1 = BashOperator(
+    task_id='print_date',
+    bash_command='date',
+    dag=dag)
+
+The precedence rules for a task are as follows:
+ - Explicitly passed arguments
+ - Values that exist in the default_args dictionary
+ - The operator’s default value, if one exists
+
+# Templating with Jinja (we can pass dynamic parameters through this option)
+
+templated_command = """
+    {% for i in range(5) %}
+        echo "{{ ds }}"
+        echo "{{ macros.ds_add(ds, 7) }}"
+        echo "{{ params.my_param }}"
+    {% endfor %}
+"""
+
+t3 = BashOperator(
+    task_id='templated',
+    bash_command=templated_command,
+    params={'my_param': 'Parameter I passed in'},
+    dag=dag)
+
+-> templated_command contains code logic in {% %} blocks,
+-> references parameters like {{ ds }},
+-> calls a function as in {{ macros.ds_add(ds, 7)}},
+-> references a user-defined parameter in {{ params.my_param }}.
+
+#dependencies
+# This means that t2 will depend on t1
+# running successfully to run
+# It is equivalent to
+# t1.set_downstream(t2)
+
+t2.set_upstream(t1)
+
+# all of this is equivalent to
+# dag.set_dependency('print_date', 'sleep')
+# dag.set_dependency('print_date', 'templated')
+
+t3.set_upstream(t1)
+
+Running the Script:
+-------------------
+
+Create "dags" folder under in airflow_home.
+Save the above code as python files under dags folder.
+Run the python "python ~/airflow/dags/tutorial.py"
+If the script does not raise an exception it means that you haven’t done anything horribly wrong.
+
+Airflow commands:
+====================
+# print the list of active DAGs [list of dags names]
+airflow list_dags
+
+# prints the list of tasks the "tutorial" dag_id
+airflow list_tasks tutorial
+
+# prints the hierarchy of tasks in the tutorial DAG
+airflow list_tasks tutorial --tree
+
+
+# command layout: command subcommand dag_id task_id date. Below command will test individual tasks in dags.
+# testing print_date(task name)
+airflow test tutorial print_date 2015-06-01
+
+# testing sleep
+airflow test tutorial sleep 2015-06-01
+
+# testing templated
+airflow test tutorial templated 2015-06-01
+
+Note that the airflow test command runs task instances locally, outputs their log to stdout (on screen), doesn’t bother with dependencies,
+and doesn’t communicate state (running, success, failed, ...) to the database. It simply allows testing a single task instance.
+
+Backfill: [ run your entire dag]
+---------------------------------
+backfill will respect your dependencies, emit logs into files and talk to the database to record status.
+If you do have a webserver up, you’ll be able to track the progress.
+airflow webserver will start a web server if you are interested in tracking the progress visually as your backfill progresses.
+
+Note that if you use depends_on_past=True, individual task instances will depend on the success of the preceding task instance,
+except for the start_date specified itself, for which this dependency is disregarded.
+
+The date range in this context is a start_date and optionally an end_date, which are used to populate the run schedule with task instances from this dag.
+
+# start your backfill on a date range
+airflow backfill tutorial -s 2015-06-01 -e 2015-06-07
+
+After running this command, check in UI on the status of the job.
+
+The order of precedence is as follows -
+- environment variable
+- configuration in airflow.cfg
+- command in airflow.cfg
+- default
+
+
+
+Setting up a Backend:
+========================
+If you want to take a real test drive of Airflow, you should consider setting up a real database backend and switching to the LocalExecutor.
+As Airflow was built to interact with its metadata using the great SqlAlchemy library, you should be able to use any database backend supported as a SqlAlchemy backend.
+We recommend using MySQL or Postgres.
+
+If you decide to use Postgres, we recommend using the psycopg2 driver and specifying it in your SqlAlchemy connection string.
+pip install psycopg2
+
+Also note that since SqlAlchemy does not expose a way to target a specific schema in the Postgres connection URI, you may want to set a default
+schema for your role with a command similar to
+Create a database called airflow and create schema called wrsdata and execute the below command
+
+  ALTER ROLE "nwe.nganesan" SET search_path = airflow, wrsdata;    [ airflow=> db, foobar=> schema]
+
+Once you’ve setup your database to host Airflow, you’ll need to alter the SqlAlchemy connection string located in your
+configuration file $AIRFLOW_HOME/airflow.cfg. You should then also change the “executor” setting to use “LocalExecutor”,
+an executor that can parallelize task instances locally.
+
+sql_alchemy_conn = postgresql://nwe.nganesan@localhost:5432/airflow
+
+# initialize the database
+airflow initdb
+
+
+Connections:
+==============
+Information such as hostname, port, login and passwords to other systems and services is handled in the Admin->Connection
