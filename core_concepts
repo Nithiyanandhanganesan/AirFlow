@@ -1,0 +1,101 @@
+DAGs:
+========
+In Airflow, a DAG – or a Directed Acyclic Graph – is a collection of all the tasks you want to run, organized in a way that reflects their
+relationships and dependencies.
+
+DAGs are defined in standard Python files that are placed in Airflow’s DAG_FOLDER.
+Airflow will execute the code in each file to dynamically build the DAG objects.
+
+Scope:
+-----
+Airflow will load any DAG object it can import from a DAGfile. Critically, that means the DAG must appear in globals().
+Consider the following two DAGs. Only dag_1 will be loaded; the other one only appears in a local scope.
+
+dag_1 = DAG('this_dag_will_be_discovered')
+
+def my_function()
+    dag_2 = DAG('but_this_dag_will_not')
+
+my_function()
+
+Sometimes this can be put to good use. For example, a common pattern with SubDagOperator is to define the subdag inside a function so that
+Airflow doesn’t try to load it as a standalone DAG.
+
+
+Default Arguments:
+---------------------
+
+default_args=dict(
+    start_date=datetime(2016, 1, 1),
+    owner='Airflow')
+
+dag = DAG('my_dag', default_args=default_args)
+op = DummyOperator(task_id='dummy', dag=dag)
+print(op.owner) # Airflow
+
+ Operators:
+ ------------
+
+While DAGs describe how to run a workflow, Operators determine what actually gets done.
+An operator describes a single task in a workflow.
+
+Airflow provides operators for many common tasks, including:
+
+BashOperator - executes a bash command
+PythonOperator - calls an arbitrary Python function
+EmailOperator - sends an email
+HTTPOperator - sends an HTTP request
+SqlOperator - executes a SQL command
+Sensor - waits for a certain time, file, database row, S3 key, etc...
+
+
+In addition to these basic building blocks, there are many more specific operators:
+DockerOperator, HiveOperator, S3FileTransferOperator, PrestoToMysqlOperator, SlackOperator
+
+
+Bitshift Composition:
+-----------------------
+Added in Airflow 1.8
+
+Traditionally, operator relationships are set with the set_upstream() and set_downstream() methods.
+In Airflow 1.8, this can be done with the Python bitshift operators >> and <<.
+The following four statements are all functionally equivalent:
+
+op1 >> op2
+op1.set_downstream(op2)
+
+op2 << op1
+op2.set_upstream(op1)
+
+When using the bitshift to compose operators, the relationship is set in the direction that the bitshift operator points.
+For example, op1 >> op2 means that op1 runs first and op2 runs second. Multiple operators can be composed – keep in mind the chain is
+executed left-to-right and the rightmost object is always returned. For example:
+
+op1 >> op2 >> op3 << op4
+
+Tasks:
+---------
+Once an operator is instantiated, it is referred to as a “task”. The instantiation defines specific values when calling the abstract operator,
+and the parameterized task becomes a node in a DAG.
+
+Workflows:
+---------
+
+DAG:         a description of the order in which work should take place
+Operator:    a class that acts as a template for carrying out some work
+Task:        a parameterized instance of an operator
+Task Instance: a task that 1) has been assigned to a DAG and 2) has a state associated with a specific run of the DAG
+
+By combining DAGs and Operators to create TaskInstances, you can build complex workflows.
+
+
+Hooks:
+----------
+
+Hooks are interfaces to external platforms and databases like Hive, S3, MySQL, Postgres, HDFS, and Pig.
+Hooks implement a common interface when possible, and act as a building block for operators.
+They also use the airflow.models.Connection model to retrieve hostnames and authentication information.
+Hooks keep authentication code and information out of pipelines, centralized in the metadata database.
+
+Hooks are also very useful on their own to use in Python scripts, Airflow airflow.operators.PythonOperator, and in interactive environments
+like iPython or Jupyter Notebook.
